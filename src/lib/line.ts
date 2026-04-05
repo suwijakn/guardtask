@@ -1,6 +1,8 @@
-// LINE Messaging API client + helpers
+import { Client } from "@line/bot-sdk";
 
-// TODO: Implement LINE client
-export const line = {
-  // LINE client will go here
+const config = {
+  channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN || "",
+  channelSecret: process.env.LINE_CHANNEL_SECRET || "",
 };
+
+export const lineClient = config.channelAccessToken ? new Client(config) : null;

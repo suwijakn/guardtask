@@ -1,8 +1,32 @@
-// GET/POST: List + create guards
+import { NextResponse } from "next/server";
+import { db } from "@/lib/db";
 
 export async function GET() {
-  // TODO: Implement guard list
-  return Response.json({ guards: [] });
+  try {
+    const guards = await db.guard.findMany({
+      select: {
+        id: true,
+        fullName: true,
+        employeeCode: true,
+        employmentStatus: true,
+        currentSite: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+      },
+      orderBy: { fullName: "asc" },
+    });
+
+    return NextResponse.json({ guards });
+  } catch (error) {
+    console.error("Error fetching guards:", error);
+    return NextResponse.json(
+      { error: "Failed to fetch guards" },
+      { status: 500 },
+    );
+  }
 }
 
 export async function POST(request: Request) {

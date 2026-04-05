@@ -4,6 +4,19 @@
 > **สถานะ:** พร้อมส่ง Dev (Windsurf)
 > **Stack:** Next.js (App Router) + PostgreSQL + BetterAuth + LINE OA (LIFF) + Claude API
 > **Hosting:** Vercel + Supabase (เริ่มจาก free tier)
+>
+> **เปลี่ยนแปลงจาก v1.0:**
+> - เพิ่ม LINE Identity Binding + Site Password fallback (Section 4.1, 4.6, 6.2, 11F) — ป้องกันการเห็น guard list ทั้งหมด, rate limit, pending mapping approval — security layer สำหรับ LIFF check-in
+> - เพิ่ม CompreFace Face Verification (Section 11E) — self-hosted บน Hetzner, enrollment flow, similarity threshold, integration กับ Next.js
+> - เพิ่ม Secretary Agent (Section 11D) — morning briefing 07:00, realtime ping, cooldown, snooze via LINE
+> - เพิ่ม Leave Protocol per-site (Section 11C) — auto push LINE แจ้งลูกค้าเมื่อมีคนแทน, deadline reminder, ตั้งค่าแยกแต่ละ site
+> - เพิ่ม 2-Layer AI Routing (Section 11A) — Layer 1 rule-based + fuzzy match ก่อน ไม่ส่งทุก message เข้า Claude
+> - เพิ่ม Prompt Caching สำหรับทุก Claude call (Section 11B)
+> - ปรับ Cron no-show ให้มี DB pre-filter ก่อนเรียก Claude (Section 21.1)
+> - เพิ่ม Cross-check Cron ทุกเช้า/เย็น (Section 21.5) — safety net จับ edge case ที่หลุดทั้งสอง layer
+> - ปรับ Webhook handler ให้ผ่าน routing layer ก่อนเสมอ (Section 19.1)
+> - เพิ่ม Cron schedule สำหรับ cross-check ใน vercel.json (Section 25.3)
+
 ---
 
 ## 1. Product Overview
@@ -90,18 +103,105 @@ Web app ฝังใน LINE OA (ผ่าน LIFF) + AI-powered alerts ที�
 
 ## 4. Module A: Shift Tracking (เช็คอิน/เช็คเอาท์)
 
-### 4.1 Check-in Flow — ใช้ได้ทุกเครื่อง (ส่วนตัว + เครื่องรวม)
+### 4.1 Check-in Flow — LINE Identity Binding + Site Password Fallback
 
 **Entry point:** ปุ่ม Rich Menu ใน LINE OA → เปิด LIFF page `/liff/checkin`
 
-**Steps:**
+LIFF เรียก `liff.getProfile()` ทันทีเพื่อดึง `lineUserId` ก่อนแสดง UI ใดๆ
 
-1. **เลือกชื่อ** — รปภ พิมพ์ชื่อ/ชื่อเล่น → autocomplete จาก DB (เฉพาะ `employment_status = 'active'`)
-2. **เลือกไซต์** — dropdown แสดงเฉพาะ site ที่ รปภ คนนั้น whitelist ไว้ (จาก `guard_site_assignments`) โดย primary site ถูก auto-select
-3. **ถ่ายรูป** — กล้องหน้า (`capture="user"`) ถ่ายสดเท่านั้น ไม่ให้เลือกจาก gallery
-4. **Submit** — ระบบบันทึก + คำนวณสถานะ + route รูปไปกลุ่มลูกค้า (ถ้า site config เปิด) + ตรวจ alert
+```
+เปิด /liff/checkin
+        │
+        ▼
+liff.getProfile() → lineUserId
+        │
+        ▼
+GET /api/checkin/identity?lineUserId=Uxxxxx
+        │
+        ├── MAPPED + VERIFIED ✅
+        │   Path A: Verified Flow
+        │   → เลือก site (dropdown เฉพาะ site ที่ whitelist)
+        │   → เลือกชื่อ (dropdown เฉพาะ guards ของ site นั้น)
+        │   → ถ่ายรูป → submit
+        │
+        └── ไม่มีใน DB / pending / unverified
+            Path B: Site Password Fallback
+            → แสดงฟอร์ม "ใส่รหัสผ่านไซต์"
+            → POST /api/checkin/verify-site-password
+            → password ตรง → รู้ว่าอยู่ site ไหน
+            → เลือกชื่อ (dropdown เฉพาะ guards ของ site นั้น)
+            → ถ่ายรูป → submit
+            + สร้าง pending line_mapping อัตโนมัติ (รอ admin approve)
+```
 
-**ไม่มี login / ไม่มี PIN / ไม่มี password** — identity มาจาก "ชื่อที่เลือก + รูปที่ถ่าย" ตรวจสอบทีหลังโดย admin
+#### Path A — Verified Flow (LINE mapped แล้ว)
+
+1. **เลือก site** — dropdown เฉพาะ sites ที่ guard_site_assignments ของ LINE userId นั้น
+2. **เลือกชื่อ** — dropdown เฉพาะ guards ที่ assigned กับ site ที่เลือก (ทุกคน — รองรับเครื่องรวม)
+3. **ถ่ายรูป** — กล้องหน้า (`capture="user"`) ถ่ายสดเท่านั้น
+4. **Submit**
+
+#### Path B — Site Password Fallback (ยังไม่ verified)
+
+1. **ใส่ site password** — 6-digit code ที่ admin generate ให้แต่ละ site
+2. **POST /api/checkin/verify-site-password** → ระบบตรวจ bcrypt hash → คืน site_id
+3. **เลือกชื่อ** — dropdown เฉพาะ guards ของ site นั้น
+4. **ถ่ายรูป** — กล้องหน้าเท่านั้น
+5. **Submit** → เช็คอินสำเร็จ
+6. **[Background]** สร้าง `line_mappings` record:
+   - `line_user_id` = lineUserId จาก LIFF
+   - `guard_id` = guard ที่เลือก
+   - `site_id` = site ที่ password ตรง
+   - `is_verified` = false (รอ admin approve)
+   - Admin เห็นใน `/admin/line-mapping` → กด approve
+
+> **หมายเหตุ:** รปภ ที่ยัง pending ต้องใส่ password ทุกครั้ง จนกว่า admin จะ approve
+> เมื่อ approve แล้ว → ครั้งถัดไปใช้ Path A (ไม่ต้องใส่ password อีก)
+
+### 4.6 Site Password Management
+
+แต่ละ site มี 6-digit checkin password ใช้สำหรับ Path B fallback
+
+**Admin สร้าง/เปลี่ยน password ใน `/admin/sites/[id]`:**
+
+```
+กด [Generate New Password]
+        │
+        ▼
+ระบบสร้าง random 6-digit code เช่น "847293"
+bcrypt hash → เก็บใน sites.checkin_password_hash
+        │
+        ├── แสดง code ให้ admin copy (ครั้งเดียว ไม่เก็บ plaintext)
+        └── แสดง QR code สำหรับ admin ส่งให้ รปภ ทาง LINE กลุ่มไซต์
+```
+
+**กฎ:**
+- generate ใหม่ = code เก่าใช้ไม่ได้ทันที
+- ไม่เก็บ plaintext ใน DB — เก็บแค่ bcrypt hash
+- แสดง `password_updated_at` ใน admin UI เพื่อให้รู้ว่า code นี้อายุเท่าไหร่
+- แนะนำเปลี่ยนทุก 30 วัน หรือเมื่อมี รปภ ลาออก
+
+**DB fields เพิ่มใน `sites` table:**
+```sql
+checkin_password_hash  VARCHAR(255),   -- bcrypt hash ของ 6-digit code
+password_updated_at    TIMESTAMPTZ,    -- เวลาที่ generate ล่าสุด
+```
+
+**API:**
+```
+POST /api/sites/[id]/generate-password
+  → สร้าง 6-digit code
+  → bcrypt hash → update sites.checkin_password_hash + password_updated_at
+  → return { plaintext_code: "847293" }  ← แสดงครั้งเดียว ไม่เก็บ
+
+POST /api/checkin/verify-site-password
+  body: { password: "847293", lineUserId: "Uxxxxx" }
+  → ค้นหา site ที่ bcrypt.compare(password, hash) = true
+  → return { site_id, site_name }  ← ถ้าตรง
+  → return 401 ← ถ้าไม่ตรง (ไม่บอกว่า site ไหนผิด)
+```
+
+---
 
 ### 4.2 Check-out Flow
 
@@ -253,19 +353,47 @@ Claude API รับข้อความ + context (guard profile, leave histor
 
 ### 6.2 LINE Account Mapping
 
-**2 วิธีผูก LINE กับ guard:**
+**line_mappings ใช้สำหรับ 2 จุดหลัก:**
+1. ระบุตัวตน รปภ เมื่อพิมพ์ข้อความใน LINE OA (ขอลา, ถามข้อมูล, snooze)
+2. **ควบคุม LIFF check-in** — verified = true → ใช้ Path A (ไม่ต้องใส่ password)
 
-**วิธี A: รปภ ส่งข้อความ "ลงทะเบียน" ใน LINE OA**
-→ ระบบรับ LINE userId + display name → สร้าง pending record ใน `line_mappings`
-→ แสดงใน admin panel → Suwijak เลือกว่าตรงกับ guard คนไหน → กด Map
+**3 วิธีสร้าง mapping:**
 
-**วิธี B: Admin ส่ง unique registration link ให้ รปภ**
-→ รปภ กด link → LIFF เปิด → ระบบจับ LINE userId → auto-map กับ guard ที่กำหนด
+**วิธี A: Auto-create จาก LIFF check-in (Path B)**
+รปภ ใส่ site password + เลือกชื่อ + เช็คอินสำเร็จ
+→ ระบบสร้าง `line_mappings` record อัตโนมัติ (is_verified = false)
+→ Admin เห็นใน `/admin/line-mapping` → กด [Approve] → is_verified = true
 
-**line_mappings ใช้สำหรับ:**
-- ระบุตัวตน รปภ เมื่อพิมพ์ข้อความใน LINE OA (ขอลา, ถามข้อมูล)
-- ส่ง push message กลับไปหา รปภ คนนั้น (ผลอนุมัติลา, alert ฯลฯ)
-- **ไม่จำเป็นสำหรับเช็คอิน** (เช็คอินใช้เลือกชื่อ + ถ่ายรูปแทน)
+**วิธี B: รปภ ส่งข้อความ "ลงทะเบียน" ใน LINE OA**
+→ ระบบรับ LINE userId → สร้าง pending record
+→ Admin เลือก guard ที่ตรงใน `/admin/line-mapping` → กด [Map + Approve]
+
+**วิธี C: Admin ส่ง registration link ให้ รปภ โดยตรง**
+→ Admin สร้าง unique token สำหรับ guard คนนั้น
+→ รปภ กด link → LIFF เปิด → จับ LINE userId → auto-map + is_verified = true
+
+**Admin UI `/admin/line-mapping`:**
+
+| Column | Description |
+|--------|-------------|
+| LINE display name | ชื่อที่แสดงใน LINE |
+| LINE userId | Uxxxxx |
+| Guard | ชื่อ guard ที่ map (หรือ "รอเลือก") |
+| Site | site ที่เช็คอินมา (Path B) |
+| วิธีที่มา | auto_checkin / line_message / admin_link |
+| สถานะ | 🟡 Pending / ✅ Verified |
+| Action | [Approve] [Reject] [เปลี่ยน guard] |
+
+**เมื่อ Admin กด Approve:**
+- `line_mappings.is_verified = true`
+- `line_mappings.mapped_by = admin_id`
+- LINE push แจ้ง รปภ: "✅ ลงทะเบียนเรียบร้อยแล้วครับ ครั้งถัดไปไม่ต้องใส่รหัสผ่านอีก"
+
+**fields เพิ่มใน `line_mappings` table:**
+```sql
+site_id        UUID REFERENCES sites(id),  -- site ที่ใช้ password ตรง (Path B)
+mapping_method VARCHAR(20),                -- 'auto_checkin' | 'line_message' | 'admin_link'
+```
 
 ### 6.3 Resignation
 
@@ -426,6 +554,8 @@ CREATE TABLE sites (
   client_contact_line   VARCHAR(50),
   photo_routing         JSONB DEFAULT '{}',
   leave_protocol        JSONB DEFAULT '{}',
+  checkin_password_hash  VARCHAR(255),          -- bcrypt hash ของ 6-digit site password
+  password_updated_at    TIMESTAMPTZ,           -- เวลาที่ generate password ล่าสุด
   -- leave_protocol schema:
   -- {
   --   "notify_client_on_leave": true,
@@ -489,13 +619,18 @@ CREATE TABLE guard_site_assignments (
 -- LINE MAPPING
 -- =============================================
 CREATE TABLE line_mappings (
-  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  line_user_id  VARCHAR(50) UNIQUE NOT NULL,
-  guard_id      UUID REFERENCES guards(id),
-  display_name  VARCHAR(100),
-  mapped_by     UUID,
-  is_verified   BOOLEAN DEFAULT false,
-  created_at    TIMESTAMPTZ DEFAULT NOW()
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  line_user_id    VARCHAR(50) UNIQUE NOT NULL,
+  guard_id        UUID REFERENCES guards(id),
+  display_name    VARCHAR(100),
+  mapped_by       UUID,                          -- admin ที่ approve
+  is_verified     BOOLEAN DEFAULT false,
+  site_id         UUID REFERENCES sites(id),     -- site ที่ใช้ password (Path B)
+  mapping_method  VARCHAR(20) DEFAULT 'auto_checkin',
+  -- 'auto_checkin' = สร้างจาก LIFF Path B
+  -- 'line_message' = รปภ ส่ง "ลงทะเบียน" ใน LINE
+  -- 'admin_link'   = admin ส่ง unique link ให้
+  created_at      TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- =============================================
@@ -731,7 +866,8 @@ GROUP BY DATE_TRUNC('week', sc.checkin_at);
 │   ├── /sites
 │   │   ├── /                     GET/POST — list + create sites
 │   │   ├── /[id]                 GET/PUT  — site detail + update routing config
-│   │   └── /[id]/assignments     GET/POST — manage guard whitelist
+│   │   ├── /[id]/assignments     GET/POST — manage guard whitelist
+│   │   └── /[id]/generate-password POST  — generate new 6-digit site password → return plaintext once
 │   │
 │   ├── /leave
 │   │   ├── /                     GET/POST — list + create leave requests
@@ -744,8 +880,13 @@ GROUP BY DATE_TRUNC('week', sc.checkin_at);
 │   │
 │   ├── /line-mapping
 │   │   ├── /                     GET  — list all mappings
-│   │   ├── /pending              GET  — unmapped LINE users
-│   │   └── /map                  POST — map LINE userId to guard
+│   │   ├── /pending              GET  — unmapped/unverified LINE users
+│   │   ├── /map                  POST — map LINE userId to guard + approve
+│   │   └── /approve/[id]         POST — approve pending mapping
+│   │
+│   ├── /checkin
+│   │   ├── /identity             GET  — ตรวจ LINE userId → verified หรือไม่
+│   │   ├── /verify-site-password POST — ตรวจ site password → return site_id
 │   │
 │   ├── /guards
 │   │   ├── /[id]/enroll-face     POST — upload profile photo to CompreFace (enrollment)
@@ -1595,6 +1736,212 @@ COMPREFACE_API_KEY=<api-key-from-compreface-ui>
 เทียบ AWS Rekognition: 65 รปภ × 2 ครั้ง/วัน × 30 วัน = 3,900 calls/เดือน × $0.001 = $3.90 (~140 บาท) — ราคาใกล้กัน แต่ CompreFace ไม่มี per-call cost เมื่อ scale ขึ้น
 
 
+
+---
+
+### 11F. LINE Identity Binding — LIFF Check-in Security (v2.0)
+
+**แนวคิด:** ก่อน LIFF แสดง UI ใดๆ ให้ตรวจ LINE userId ก่อนเสมอ
+ป้องกันไม่ให้คนที่เปิด URL เห็นรายชื่อ รปภ ทั้งหมด
+
+---
+
+#### GET `/api/checkin/identity`
+
+```typescript
+// GET /api/checkin/identity?lineUserId=Uxxxxx
+
+export async function GET(req: Request) {
+  const lineUserId = new URL(req.url).searchParams.get('lineUserId')
+  if (!lineUserId) return Response.json({ status: 'no_line_id' }, { status: 400 })
+
+  const mapping = await db.line_mappings.findUnique({
+    where: { line_user_id: lineUserId },
+    include: { guard: { include: { guard_site_assignments: { include: { site: true } } } } }
+  })
+
+  if (!mapping || !mapping.is_verified) {
+    return Response.json({ status: 'unverified' })
+    // → LIFF แสดงหน้าใส่ site password (Path B)
+  }
+
+  return Response.json({
+    status: 'verified',
+    guard_id: mapping.guard_id,
+    guard_name: mapping.guard.full_name,
+    sites: mapping.guard.guard_site_assignments.map(a => ({
+      id: a.site_id,
+      name: a.site.name,
+      is_primary: a.is_primary
+    }))
+    // → LIFF แสดง site dropdown + ชื่อตัวเอง (Path A)
+  })
+}
+```
+
+---
+
+#### POST `/api/checkin/verify-site-password`
+
+```typescript
+// POST /api/checkin/verify-site-password
+// body: { password: "847293", lineUserId: "Uxxxxx" }
+
+export async function POST(req: Request) {
+  const { password, lineUserId } = await req.json()
+
+  // ค้นหา site ที่ password ตรง
+  const sites = await db.sites.findMany({
+    where: { is_active: true, checkin_password_hash: { not: null } }
+  })
+
+  let matchedSite = null
+  for (const site of sites) {
+    if (await bcrypt.compare(password, site.checkin_password_hash)) {
+      matchedSite = site
+      break
+    }
+  }
+
+  if (!matchedSite) {
+    return Response.json({ error: 'รหัสผ่านไม่ถูกต้อง' }, { status: 401 })
+    // ไม่บอกว่า site ไหนผิด — ป้องกัน enumeration
+  }
+
+  // ดึง guards ของ site นี้
+  const guards = await db.guard_site_assignments.findMany({
+    where: { site_id: matchedSite.id },
+    include: { guard: { where: { employment_status: 'active' } } }
+  })
+
+  return Response.json({
+    site_id: matchedSite.id,
+    site_name: matchedSite.name,
+    guards: guards.map(a => ({
+      id: a.guard_id,
+      full_name: a.guard.full_name,
+      nickname: a.guard.nickname
+    }))
+  })
+  // → LIFF แสดง dropdown เฉพาะ guards ของ site นี้
+}
+```
+
+---
+
+#### สร้าง Pending Mapping หลังเช็คอินสำเร็จ (Path B)
+
+```typescript
+// ใน POST /api/checkin หลัง insert shift_checkins สำเร็จ
+// ถ้า checkin มาจาก Path B (มี lineUserId แต่ยังไม่ verified)
+
+if (pathB && lineUserId && guardId && siteId) {
+  const existing = await db.line_mappings.findUnique({
+    where: { line_user_id: lineUserId }
+  })
+
+  if (!existing) {
+    await db.line_mappings.create({
+      data: {
+        line_user_id: lineUserId,
+        guard_id: guardId,
+        site_id: siteId,
+        display_name: lineDisplayName,
+        is_verified: false,
+        mapping_method: 'auto_checkin'
+      }
+    })
+
+    // notify admin ใน LINE
+    await lineClient.pushMessage(process.env.ADMIN_LINE_USER_ID, {
+      type: 'text',
+      text: `🔔 มีคำขอลงทะเบียนใหม่
+` +
+            `รปภ: ${guardName}
+` +
+            `ไซต์: ${siteName}
+` +
+            `LINE: ${lineDisplayName}
+` +
+            `กรุณา approve ที่ /admin/line-mapping`
+    })
+  }
+  // ถ้ามีอยู่แล้ว (pending ซ้ำ) → ไม่สร้างใหม่ ไม่ error
+}
+```
+
+---
+
+#### POST `/api/sites/[id]/generate-password`
+
+```typescript
+export async function POST(req: Request, { params }: { params: { id: string } }) {
+  // สุ่ม 6-digit code
+  const code = Math.floor(100000 + Math.random() * 900000).toString()
+  const hash = await bcrypt.hash(code, 10)
+
+  await db.sites.update({
+    where: { id: params.id },
+    data: {
+      checkin_password_hash: hash,
+      password_updated_at: new Date()
+    }
+  })
+
+  // return plaintext ครั้งเดียว — ไม่เก็บ plaintext ใน DB
+  return Response.json({ code })
+}
+```
+
+---
+
+#### Admin UI `/admin/sites/[id]` — Password Section
+
+```
+Site Password สำหรับเช็คอิน
+─────────────────────────────────────
+อัปเดตล่าสุด: 1 เม.ย. 69 (5 วันที่แล้ว)
+
+[Generate New Password]
+
+⚠️ code เก่าจะใช้ไม่ได้ทันที — แจก code ใหม่ให้ รปภ ก่อนกด
+```
+
+เมื่อกด Generate → modal แสดง:
+```
+รหัสผ่านใหม่: 847293
+
+[Copy] [QR Code]
+
+⚠️ แสดงครั้งเดียว — ส่งให้ รปภ ก่อนปิด
+```
+
+---
+
+#### Admin UI `/admin/line-mapping` — Pending Approvals
+
+ตารางแสดง pending mappings:
+
+| LINE Name | Guard | Site | วิธีที่มา | วันที่ | Action |
+|-----------|-------|------|---------|-------|--------|
+| สมชาย LINE | สมชาย ใจดี | Kibun | เช็คอิน | 2 เม.ย. | [✅ Approve] [❌ Reject] [✏️ เปลี่ยน guard] |
+
+กด **Approve** → `is_verified = true` + LINE push แจ้ง รปภ
+กด **เปลี่ยน guard** → dropdown เลือก guard ใหม่ก่อน approve (กรณี รปภ เลือกชื่อผิด)
+
+---
+
+#### Security Notes
+
+| Risk | Mitigation |
+|------|-----------|
+| คนอื่นเดา 6-digit code | bcrypt compare ทุก site → rate limit 5 ครั้ง/นาที/IP |
+| รปภ เลือกชื่อผิดตอน Path B | Admin ตรวจเทียบกับรูปเช็คอิน + เปลี่ยน guard ได้ตอน approve |
+| password leak ใน LINE group | Generate ใหม่ได้ทันที → code เก่าใช้ไม่ได้ |
+| ไม่มี LIFF context (เปิดผ่าน browser) | `liff.getProfile()` fail → redirect ไปหน้า error "กรุณาเปิดผ่าน LINE" |
+
+---
+
 ### 11.2 AI Fallback สำหรับ LINE Chat (ปรับ v2.0)
 
 เมื่อ Layer 1 return `IGNORE` → ไม่เรียก Claude — ใช้ escape hatch reply แทน
@@ -1686,6 +2033,10 @@ Recalculate: ทุกวัน 00:00 + realtime เมื่อมี event ใ
 - **Photo routing config:** toggle ส่งรูปไปกลุ่มลูกค้า on/off + LINE group ID
 - **Guard assignments:** whitelist รปภ + primary flag
 - **Shift config:** เวลาเริ่ม/สิ้นสุดกะเช้า-ดึก + จำนวน รปภ ที่ต้องการ
+- **Site Password config (v2.0):**
+  - แสดง `password_updated_at` (อัปเดตล่าสุดเมื่อไหร่)
+  - ปุ่ม [Generate New Password] → modal แสดง 6-digit code + QR (ครั้งเดียว)
+  - ⚠️ warning ว่า code เก่าจะใช้ไม่ได้ทันทีหลัง generate ใหม่
 - **Leave Protocol config (v2.0):** ตั้งค่า per-site ว่าระบบจะแจ้งลูกค้าอย่างไรเมื่อ รปภ ลา
   - Toggle: แจ้งลูกค้าเมื่ออนุมัติลา (on/off)
   - Toggle: auto push LINE เมื่อมีคนแทน (on/off)
@@ -2769,6 +3120,66 @@ src/
 
 ```
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+MODULE A0: LINE IDENTITY + SITE PASSWORD
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+A0-1. เปิด LIFF ผ่าน browser ธรรมดา (ไม่ใช่ LINE)
+      Input : เปิด URL /liff/checkin ใน Chrome โดยตรง
+      Expect: liff.getProfile() fail → หน้า error "กรุณาเปิดผ่าน LINE"
+
+A0-2. Path A — LINE verified แล้ว
+      Input : LINE userId ที่มีใน line_mappings + is_verified = true
+      Expect: GET /api/checkin/identity → status: 'verified'
+      Verify: LIFF แสดง dropdown site (whitelist เท่านั้น) — ไม่แสดงฟอร์ม password
+
+A0-3. Path B — LINE ยังไม่ verified
+      Input : LINE userId ที่ไม่มีใน DB
+      Expect: GET /api/checkin/identity → status: 'unverified'
+      Verify: LIFF แสดงฟอร์ม "ใส่รหัสผ่านไซต์" — ไม่แสดง guard dropdown ก่อน
+
+A0-4. Site password ถูกต้อง
+      Input : POST /api/checkin/verify-site-password { password: "847293" }
+      Expect: return { site_id, site_name, guards[] }
+      Verify: guards[] มีเฉพาะ guards ของ site นั้น ไม่มี guard จาก site อื่น
+
+A0-5. Site password ผิด
+      Input : password ที่ไม่ตรงกับ site ใดเลย
+      Expect: return 401 "รหัสผ่านไม่ถูกต้อง"
+      Verify: ไม่บอกว่า site ไหนผิด — ป้องกัน enumeration
+
+A0-6. Rate limit site password
+      Input : ใส่ password ผิด 5 ครั้งติดกันจาก IP เดียวกัน
+      Expect: ครั้งที่ 6 return 429 "ลองใหม่ใน 1 นาที"
+
+A0-7. Generate site password
+      Input : Admin กด [Generate New Password] ใน /admin/sites/[id]
+      Expect: POST /api/sites/[id]/generate-password → modal แสดง 6-digit code
+      Verify: code เก่า verify ไม่ผ่านทันที (bcrypt ตรวจ hash ใหม่แล้ว)
+      Verify: password_updated_at อัปเดต
+
+A0-8. Auto-create pending mapping หลังเช็คอิน Path B
+      Input : รปภ ใส่ password ถูก + เลือกชื่อ + เช็คอินสำเร็จ
+      Expect: line_mappings record สร้างพร้อม is_verified = false, mapping_method = 'auto_checkin'
+      Verify: admin ได้รับ LINE notification "มีคำขอลงทะเบียนใหม่"
+
+A0-9. Pending mapping ซ้ำ
+      Input : รปภ เช็คอินด้วย Path B อีกครั้ง (ยังรอ approve อยู่)
+      Expect: ไม่สร้าง duplicate record — เช็คอินปกติ ไม่ error
+
+A0-10. Admin approve mapping
+       Input : Admin กด [✅ Approve] ใน /admin/line-mapping
+       Expect: is_verified = true, LINE push แจ้ง รปภ "ลงทะเบียนเรียบร้อยแล้ว"
+       Verify: รปภ เปิด LIFF ครั้งถัดไป → Path A (ไม่เห็น password form อีก)
+
+A0-11. Admin เปลี่ยน guard ก่อน approve
+       Input : รปภ เลือกชื่อผิดตอน Path B → admin กด [✏️ เปลี่ยน guard] → เลือกชื่อถูก → approve
+       Expect: line_mappings.guard_id = guard ที่ถูกต้อง
+
+A0-12. Admin reject mapping
+       Input : Admin กด [❌ Reject]
+       Expect: record ถูกลบหรือ flag rejected — ครั้งถัดไป รปภ ยังต้องใส่ password
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 MODULE A: CHECK-IN FLOW
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -3254,6 +3665,8 @@ J9. Alert list + filters
 | `client_contact_line` | VARCHAR(50) | LINE ID ของผู้ติดต่อ | `@ploykibun` |
 | `photo_routing` | JSONB | config การส่งรูปเช็คอินไปกลุ่มลูกค้า | ดูด้านล่าง |
 | `leave_protocol` | JSONB | config การแจ้งลูกค้าเมื่อ รปภ ลา | ดูด้านล่าง |
+| `checkin_password_hash` | VARCHAR(255) | bcrypt hash ของ 6-digit site password สำหรับ Path B | `$2b$10$...` |
+| `password_updated_at` | TIMESTAMPTZ | เวลาที่ generate password ล่าสุด | `2026-04-01 09:00:00+07` |
 
 **ตัวอย่าง `photo_routing`:**
 ```json
@@ -3443,6 +3856,28 @@ Auto push: client_notified=true, client_notified_at=14:31
 
 **ทำไม `ai_intent = 'IGNORE'` สำคัญ:**
 Cross-check cron ดึง records ที่ `ai_intent = 'IGNORE'` มาวิเคราะห์ว่ามีข้อความใดที่ควรเป็นการขอลาแต่หลุดผ่าน Layer 1 ไปหรือไม่
+
+---
+
+### 28.9 `line_mappings` — การผูก LINE account กับ guard
+
+**จุดประสงค์:** ควบคุม identity ของผู้ใช้ LIFF — verified = true คือผ่าน Path A (ไม่ต้องใส่ password)
+
+| Column | Type | Description | ตัวอย่าง |
+|--------|------|-------------|---------|
+| `line_user_id` | VARCHAR(50) | LINE userId (unique) | `U1234abcd...` |
+| `guard_id` | UUID (FK→guards) | guard ที่ map | `b2c3d4e5-...` |
+| `display_name` | VARCHAR(100) | ชื่อที่แสดงใน LINE | `สมชาย` |
+| `mapped_by` | UUID | admin ที่ approve | `admin_uuid` |
+| `is_verified` | BOOLEAN | false=pending, true=ใช้ Path A ได้ | `true` |
+| `site_id` | UUID (FK→sites) | site ที่ใช้ password ตรง (Path B) | `a1b2c3d4-...` |
+| `mapping_method` | VARCHAR(20) | วิธีที่สร้าง mapping | `auto_checkin` / `line_message` / `admin_link` |
+
+**ตัวอย่าง lifecycle:**
+```
+Path B เช็คอิน: is_verified=false, method='auto_checkin' → รอ admin
+Admin approve:  is_verified=true                          → ใช้ Path A ได้
+```
 
 ---
 

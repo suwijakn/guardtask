@@ -1,6 +1,3 @@
-// SakornGuard Manpower - Prisma Schema
-// Based on Section 8.1 of specification
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -9,85 +6,74 @@ datasource db {
   provider = "postgresql"
 }
 
-// =============================================
-// SITES
-// =============================================
-
 model Site {
-  id                  String   @id @default(uuid())
-  name                String   @db.VarChar(100)
-  shortName           String   @unique @map("short_name") @db.VarChar(20)
-  address             String?  @db.Text
-  lat                 Decimal? @db.Decimal(10, 7)
-  lng                 Decimal? @db.Decimal(10, 7)
-  geofenceRadiusM     Int      @default(200) @map("geofence_radius_m")
-  requiredGuardsDay   Int      @default(1) @map("required_guards_day")
-  requiredGuardsNight Int      @default(1) @map("required_guards_night")
-  shiftStartDay       String   @default("07:00") @map("shift_start_day") @db.VarChar(10)
-  shiftStartNight     String   @default("19:00") @map("shift_start_night") @db.VarChar(10)
-  hasSharedDevice     Boolean  @default(false) @map("has_shared_device")
-  clientContactName   String?  @map("client_contact_name") @db.VarChar(100)
-  clientContactLine   String?  @map("client_contact_line") @db.VarChar(50)
-  photoRouting        Json     @default("{}") @map("photo_routing")
-  leaveProtocol       Json     @default("{}") @map("leave_protocol")
-  isActive            Boolean  @default(true) @map("is_active")
-  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt           DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-
-  guards               Guard[]
+  id                   String                @id @default(uuid())
+  name                 String                @db.VarChar(100)
+  shortName            String                @unique @map("short_name") @db.VarChar(20)
+  address              String?
+  lat                  Decimal?              @db.Decimal(10, 7)
+  lng                  Decimal?              @db.Decimal(10, 7)
+  geofenceRadiusM      Int                   @default(200) @map("geofence_radius_m")
+  requiredGuardsDay    Int                   @default(1) @map("required_guards_day")
+  requiredGuardsNight  Int                   @default(1) @map("required_guards_night")
+  shiftStartDay        String                @default("07:00") @map("shift_start_day") @db.VarChar(10)
+  shiftStartNight      String                @default("19:00") @map("shift_start_night") @db.VarChar(10)
+  hasSharedDevice      Boolean               @default(false) @map("has_shared_device")
+  clientContactName    String?               @map("client_contact_name") @db.VarChar(100)
+  clientContactLine    String?               @map("client_contact_line") @db.VarChar(50)
+  photoRouting         Json                  @default("{}") @map("photo_routing")
+  leaveProtocol        Json                  @default("{}") @map("leave_protocol")
+  isActive             Boolean               @default(true) @map("is_active")
+  createdAt            DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime              @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  checkinPasswordHash  String?               @map("checkin_password_hash") @db.VarChar(255)
+  passwordUpdatedAt    DateTime?             @map("password_updated_at") @db.Timestamptz(6)
   guardSiteAssignments GuardSiteAssignment[]
-  shiftCheckins        ShiftCheckin[]
+  guards               Guard[]
   leaveRequests        LeaveRequest[]
+  lineMappings         LineMapping[]
   manpowerAlerts       ManpowerAlert[]
+  shiftCheckins        ShiftCheckin[]
 
   @@map("sites")
 }
 
-// =============================================
-// GUARDS
-// =============================================
-
 model Guard {
-  id                String    @id @default(uuid())
-  employeeCode      String    @unique @map("employee_code") @db.VarChar(10)
-  fullName          String    @map("full_name") @db.VarChar(100)
-  nickname          String?   @db.VarChar(50)
-  phone             String?   @db.VarChar(20)
-  photoUrl          String?   @map("photo_url") @db.VarChar(500)
-  currentSiteId     String?   @map("current_site_id")
-  position          String    @default("guard") @db.VarChar(20)
-  employmentStatus  String    @default("active") @map("employment_status") @db.VarChar(20)
-  allowAnySite      Boolean   @default(false) @map("allow_any_site")
-  startDate         DateTime? @map("start_date") @db.Date
-  endDate           DateTime? @map("end_date") @db.Date
-  resignationDate   DateTime? @map("resignation_date") @db.Date
-  resignationReason String?   @map("resignation_reason") @db.Text
-  guardScore        Int       @default(100) @map("guard_score")
-  leaveBalance      Json      @default("{\"sick\": 30, \"annual\": 6, \"personal\": 3}") @map("leave_balance")
-  faceEnrolled      Boolean   @default(false) @map("face_enrolled")
-  faceEnrolledAt    DateTime? @map("face_enrolled_at") @db.Timestamptz(6)
-  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt         DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-
-  currentSite          Site?                 @relation(fields: [currentSiteId], references: [id])
-  guardSiteAssignments GuardSiteAssignment[]
-  lineMappings         LineMapping[]
-  shiftCheckins        ShiftCheckin[]
-  leaveRequests        LeaveRequest[]
-  guardPhotos          GuardPhoto[]
-  manpowerAlerts       ManpowerAlert[]
+  id                   String                @id @default(uuid())
+  employeeCode         String                @unique @map("employee_code") @db.VarChar(10)
+  fullName             String                @map("full_name") @db.VarChar(100)
+  nickname             String?               @db.VarChar(50)
+  phone                String?               @db.VarChar(20)
+  photoUrl             String?               @map("photo_url") @db.VarChar(500)
+  currentSiteId        String?               @map("current_site_id")
+  position             String                @default("guard") @db.VarChar(20)
+  employmentStatus     String                @default("active") @map("employment_status") @db.VarChar(20)
+  allowAnySite         Boolean               @default(false) @map("allow_any_site")
+  startDate            DateTime?             @map("start_date") @db.Date
+  endDate              DateTime?             @map("end_date") @db.Date
+  resignationDate      DateTime?             @map("resignation_date") @db.Date
+  resignationReason    String?               @map("resignation_reason")
+  guardScore           Int                   @default(100) @map("guard_score")
+  leaveBalance         Json                  @default("{\"sick\": 30, \"annual\": 6, \"personal\": 3}") @map("leave_balance")
+  faceEnrolled         Boolean               @default(false) @map("face_enrolled")
+  faceEnrolledAt       DateTime?             @map("face_enrolled_at") @db.Timestamptz(6)
+  createdAt            DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime              @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   conversations        Conversation[]
-  replacementFor       ShiftCheckin[]        @relation("ReplacementGuard")
+  guardPhotos          GuardPhoto[]
+  guardSiteAssignments GuardSiteAssignment[]
+  currentSite          Site?                 @relation(fields: [currentSiteId], references: [id])
+  leaveRequests        LeaveRequest[]
   replacementForLeave  LeaveRequest[]        @relation("ReplacementGuardLeave")
+  lineMappings         LineMapping[]
+  manpowerAlerts       ManpowerAlert[]
+  shiftCheckins        ShiftCheckin[]
+  replacementFor       ShiftCheckin[]        @relation("ReplacementGuard")
 
   @@index([employmentStatus])
   @@index([currentSiteId])
   @@map("guards")
 }
-
-// =============================================
-// GUARD ↔ SITE WHITELIST
-// =============================================
 
 model GuardSiteAssignment {
   id         String   @id @default(uuid())
@@ -95,81 +81,62 @@ model GuardSiteAssignment {
   siteId     String   @map("site_id")
   isPrimary  Boolean  @default(false) @map("is_primary")
   assignedAt DateTime @default(now()) @map("assigned_at") @db.Timestamptz(6)
-
-  guard Guard @relation(fields: [guardId], references: [id], onDelete: Cascade)
-  site  Site  @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  guard      Guard    @relation(fields: [guardId], references: [id], onDelete: Cascade)
+  site       Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
 
   @@unique([guardId, siteId])
   @@index([guardId])
   @@map("guard_site_assignments")
 }
 
-// =============================================
-// LINE MAPPING
-// =============================================
-
 model LineMapping {
-  id          String   @id @default(uuid())
-  lineUserId  String   @unique @map("line_user_id") @db.VarChar(50)
-  guardId     String?  @map("guard_id")
-  displayName String?  @map("display_name") @db.VarChar(100)
-  mappedBy    String?  @map("mapped_by")
-  isVerified  Boolean  @default(false) @map("is_verified")
-  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-
-  guard Guard? @relation(fields: [guardId], references: [id])
+  id            String   @id @default(uuid())
+  lineUserId    String   @unique @map("line_user_id") @db.VarChar(50)
+  guardId       String?  @map("guard_id")
+  displayName   String?  @map("display_name") @db.VarChar(100)
+  mappedBy      String?  @map("mapped_by")
+  isVerified    Boolean  @default(false) @map("is_verified")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  mappingMethod String   @default("auto_checkin") @map("mapping_method") @db.VarChar(20)
+  siteId        String?  @map("site_id")
+  guard         Guard?   @relation(fields: [guardId], references: [id])
+  site          Site?    @relation(fields: [siteId], references: [id])
 
   @@index([lineUserId])
+  @@index([guardId])
   @@map("line_mappings")
 }
 
-// =============================================
-// SHIFT CHECK-INS
-// =============================================
-
 model ShiftCheckin {
-  id      String @id @default(uuid())
-  guardId String @map("guard_id")
-  siteId  String @map("site_id")
-
-  // Check-in
-  checkinAt         DateTime @default(now()) @map("checkin_at") @db.Timestamptz(6)
-  checkinPhotoUrl   String   @map("checkin_photo_url") @db.VarChar(500)
-  checkinLat        Decimal? @map("checkin_lat") @db.Decimal(10, 7)
-  checkinLng        Decimal? @map("checkin_lng") @db.Decimal(10, 7)
-  checkinWithinSite Boolean? @map("checkin_within_site")
-  deviceInfo        String?  @map("device_info") @db.Text
-
-  // Check-out
-  checkoutAt       DateTime? @map("checkout_at") @db.Timestamptz(6)
-  checkoutPhotoUrl String?   @map("checkout_photo_url") @db.VarChar(500)
-
-  // Auto-calculated
-  shiftType         String? @map("shift_type") @db.VarChar(10)
-  status            String  @default("on_time") @db.VarChar(20)
-  lateMinutes       Int     @default(0) @map("late_minutes")
-  consecutiveShifts Int     @default(0) @map("consecutive_shifts")
-  consecutiveHours  Int     @default(0) @map("consecutive_hours")
-  isDoubleShift     Boolean @default(false) @map("is_double_shift")
-
-  // Replacement
-  replacementForGuardId String? @map("replacement_for_guard_id")
-
-  notes String? @db.Text
-
-  // Face verification (CompreFace v2.0)
-  faceSimilarity Decimal?  @map("face_similarity") @db.Decimal(4, 3)
-  faceVerified   Boolean?  @map("face_verified")
-  faceVerifiedBy String?   @map("face_verified_by") @db.VarChar(10)
-  faceVerifiedAt DateTime? @map("face_verified_at") @db.Timestamptz(6)
-  faceReviewNote String?   @map("face_review_note") @db.Text
-
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-
-  guard               Guard        @relation(fields: [guardId], references: [id])
-  site                Site         @relation(fields: [siteId], references: [id])
-  replacementForGuard Guard?       @relation("ReplacementGuard", fields: [replacementForGuardId], references: [id])
-  guardPhotos         GuardPhoto[]
+  id                    String       @id @default(uuid())
+  guardId               String       @map("guard_id")
+  siteId                String       @map("site_id")
+  checkinAt             DateTime     @default(now()) @map("checkin_at") @db.Timestamptz(6)
+  checkinPhotoUrl       String       @map("checkin_photo_url") @db.VarChar(500)
+  checkinLat            Decimal?     @map("checkin_lat") @db.Decimal(10, 7)
+  checkinLng            Decimal?     @map("checkin_lng") @db.Decimal(10, 7)
+  checkinWithinSite     Boolean?     @map("checkin_within_site")
+  deviceInfo            String?      @map("device_info")
+  checkoutAt            DateTime?    @map("checkout_at") @db.Timestamptz(6)
+  checkoutPhotoUrl      String?      @map("checkout_photo_url") @db.VarChar(500)
+  shiftType             String?      @map("shift_type") @db.VarChar(10)
+  status                String       @default("on_time") @db.VarChar(20)
+  lateMinutes           Int          @default(0) @map("late_minutes")
+  consecutiveShifts     Int          @default(0) @map("consecutive_shifts")
+  consecutiveHours      Int          @default(0) @map("consecutive_hours")
+  isDoubleShift         Boolean      @default(false) @map("is_double_shift")
+  replacementForGuardId String?      @map("replacement_for_guard_id")
+  notes                 String?
+  faceSimilarity        Decimal?     @map("face_similarity") @db.Decimal(4, 3)
+  faceVerified          Boolean?     @map("face_verified")
+  faceVerifiedBy        String?      @map("face_verified_by") @db.VarChar(10)
+  faceVerifiedAt        DateTime?    @map("face_verified_at") @db.Timestamptz(6)
+  faceReviewNote        String?      @map("face_review_note")
+  createdAt             DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  guardPhotos           GuardPhoto[]
+  guard                 Guard        @relation(fields: [guardId], references: [id])
+  replacementForGuard   Guard?       @relation("ReplacementGuard", fields: [replacementForGuardId], references: [id])
+  site                  Site         @relation(fields: [siteId], references: [id])
 
   @@index([guardId, checkinAt])
   @@index([siteId, checkinAt])
@@ -178,132 +145,98 @@ model ShiftCheckin {
   @@map("shift_checkins")
 }
 
-// =============================================
-// LEAVE REQUESTS (ticket system)
-// =============================================
-
 model LeaveRequest {
-  id               String   @id @default(uuid())
-  ticketNumber     String   @unique @map("ticket_number") @db.VarChar(20)
-  guardId          String   @map("guard_id")
-  siteId           String   @map("site_id")
-  leaveType        String   @map("leave_type") @db.VarChar(20)
-  startDate        DateTime @map("start_date") @db.Date
-  endDate          DateTime @map("end_date") @db.Date
-  totalDays        Int      @map("total_days")
-  reason           String?  @db.Text
-  originalMessage  String?  @map("original_message") @db.Text
-  aiInterpretation Json?    @map("ai_interpretation")
-  documentUrl      String?  @map("document_url") @db.VarChar(500)
-
-  status     String    @default("pending") @db.VarChar(20)
-  reviewedBy String?   @map("reviewed_by")
-  reviewedAt DateTime? @map("reviewed_at") @db.Timestamptz(6)
-  reviewNote String?   @map("review_note") @db.Text
-
+  id                   String    @id @default(uuid())
+  ticketNumber         String    @unique @map("ticket_number") @db.VarChar(20)
+  guardId              String    @map("guard_id")
+  siteId               String    @map("site_id")
+  leaveType            String    @map("leave_type") @db.VarChar(20)
+  startDate            DateTime  @map("start_date") @db.Date
+  endDate              DateTime  @map("end_date") @db.Date
+  totalDays            Int       @map("total_days")
+  reason               String?
+  originalMessage      String?   @map("original_message")
+  aiInterpretation     Json?     @map("ai_interpretation")
+  documentUrl          String?   @map("document_url") @db.VarChar(500)
+  status               String    @default("pending") @db.VarChar(20)
+  reviewedBy           String?   @map("reviewed_by")
+  reviewedAt           DateTime? @map("reviewed_at") @db.Timestamptz(6)
+  reviewNote           String?   @map("review_note")
   replacementGuardId   String?   @map("replacement_guard_id")
   replacementConfirmed Boolean?  @default(false) @map("replacement_confirmed")
   replacementSetAt     DateTime? @map("replacement_set_at") @db.Timestamptz(6)
   clientNotified       Boolean   @default(false) @map("client_notified")
   clientNotifiedAt     DateTime? @map("client_notified_at") @db.Timestamptz(6)
-
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-
-  guard            Guard  @relation(fields: [guardId], references: [id])
-  site             Site   @relation(fields: [siteId], references: [id])
-  replacementGuard Guard? @relation("ReplacementGuardLeave", fields: [replacementGuardId], references: [id])
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  guard                Guard     @relation(fields: [guardId], references: [id])
+  replacementGuard     Guard?    @relation("ReplacementGuardLeave", fields: [replacementGuardId], references: [id])
+  site                 Site      @relation(fields: [siteId], references: [id])
 
   @@index([guardId, startDate])
   @@index([status])
   @@map("leave_requests")
 }
 
-// =============================================
-// GUARD PHOTOS
-// =============================================
-
 model GuardPhoto {
-  id         String   @id @default(uuid())
-  guardId    String   @map("guard_id")
-  photoType  String   @map("photo_type") @db.VarChar(20)
-  photoUrl   String   @map("photo_url") @db.VarChar(500)
-  takenAt    DateTime @default(now()) @map("taken_at") @db.Timestamptz(6)
-  lat        Decimal? @db.Decimal(10, 7)
-  lng        Decimal? @db.Decimal(10, 7)
-  deviceInfo String?  @map("device_info") @db.Text
-  checkinId  String?  @map("checkin_id")
-  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-
-  guard   Guard         @relation(fields: [guardId], references: [id])
-  checkin ShiftCheckin? @relation(fields: [checkinId], references: [id])
+  id         String        @id @default(uuid())
+  guardId    String        @map("guard_id")
+  photoType  String        @map("photo_type") @db.VarChar(20)
+  photoUrl   String        @map("photo_url") @db.VarChar(500)
+  takenAt    DateTime      @default(now()) @map("taken_at") @db.Timestamptz(6)
+  lat        Decimal?      @db.Decimal(10, 7)
+  lng        Decimal?      @db.Decimal(10, 7)
+  deviceInfo String?       @map("device_info")
+  checkinId  String?       @map("checkin_id")
+  createdAt  DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  checkin    ShiftCheckin? @relation(fields: [checkinId], references: [id])
+  guard      Guard         @relation(fields: [guardId], references: [id])
 
   @@index([guardId, takenAt])
   @@map("guard_photos")
 }
 
-// =============================================
-// MANPOWER ALERTS
-// =============================================
-
 model ManpowerAlert {
-  id       String  @id @default(uuid())
-  type     String  @db.VarChar(30)
-  severity String  @db.VarChar(5)
-  siteId   String? @map("site_id")
-  guardId  String? @map("guard_id")
-
-  message        String  @db.Text
-  recommendation String? @db.Text
-  aiContext      Json?   @map("ai_context")
-
-  notifiedTo  String[] @map("notified_to")
-  notifiedVia String   @default("line") @map("notified_via") @db.VarChar(10)
-
+  id             String    @id @default(uuid())
+  type           String    @db.VarChar(30)
+  severity       String    @db.VarChar(5)
+  siteId         String?   @map("site_id")
+  guardId        String?   @map("guard_id")
+  message        String
+  recommendation String?
+  aiContext      Json?     @map("ai_context")
+  notifiedTo     String[]  @map("notified_to")
+  notifiedVia    String    @default("line") @map("notified_via") @db.VarChar(10)
   acknowledged   Boolean   @default(false)
   acknowledgedBy String?   @map("acknowledged_by")
   acknowledgedAt DateTime? @map("acknowledged_at") @db.Timestamptz(6)
   resolvedAt     DateTime? @map("resolved_at") @db.Timestamptz(6)
   resolution     String?   @map("resolution") @db.VarChar(50)
-
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-
-  site  Site?  @relation(fields: [siteId], references: [id])
-  guard Guard? @relation(fields: [guardId], references: [id])
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  guard          Guard?    @relation(fields: [guardId], references: [id])
+  site           Site?     @relation(fields: [siteId], references: [id])
 
   @@index([createdAt])
   @@map("manpower_alerts")
 }
 
-// =============================================
-// AI CONVERSATION LOG
-// =============================================
-
 model Conversation {
-  id          String  @id @default(uuid())
-  lineUserId  String? @map("line_user_id") @db.VarChar(50)
-  guardId     String? @map("guard_id")
-  messageText String  @map("message_text") @db.Text
-  messageType String? @map("message_type") @db.VarChar(20)
-
+  id           String   @id @default(uuid())
+  lineUserId   String?  @map("line_user_id") @db.VarChar(50)
+  guardId      String?  @map("guard_id")
+  messageText  String   @map("message_text")
+  messageType  String?  @map("message_type") @db.VarChar(20)
   aiIntent     String?  @map("ai_intent") @db.VarChar(30)
   aiConfidence Decimal? @map("ai_confidence") @db.Decimal(3, 2)
   aiEntities   Json?    @map("ai_entities")
-  aiResponse   String?  @map("ai_response") @db.Text
-
-  actionTaken String? @map("action_taken") @db.VarChar(50)
-  actionRefId String? @map("action_ref_id")
-
+  aiResponse   String?  @map("ai_response")
+  actionTaken  String?  @map("action_taken") @db.VarChar(50)
+  actionRefId  String?  @map("action_ref_id")
   processingMs Int?     @map("processing_ms")
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-
-  guard Guard? @relation(fields: [guardId], references: [id])
+  guard        Guard?   @relation(fields: [guardId], references: [id])
 
   @@map("conversations")
 }
-
-// =============================================
-// SECRETARY PINGS
-// =============================================
 
 model SecretaryPing {
   id           String    @id @default(uuid())
@@ -317,30 +250,25 @@ model SecretaryPing {
   @@map("secretary_pings")
 }
 
-// =============================================
-// BETTER AUTH TABLES
-// =============================================
-
 model User {
   id            String    @id
   name          String
-  email         String
+  email         String    @unique
   emailVerified Boolean   @default(false)
   image         String?
-  role          String    @default("admin") @db.VarChar(20)
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
-  sessions      Session[]
+  role          String    @default("admin") @db.VarChar(20)
   accounts      Account[]
+  sessions      Session[]
 
-  @@unique([email])
   @@map("user")
 }
 
 model Session {
   id        String   @id
   expiresAt DateTime
-  token     String
+  token     String   @unique
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   ipAddress String?
@@ -348,7 +276,6 @@ model Session {
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@unique([token])
   @@index([userId])
   @@map("session")
 }
@@ -358,7 +285,6 @@ model Account {
   accountId             String
   providerId            String
   userId                String
-  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   accessToken           String?
   refreshToken          String?
   idToken               String?
@@ -368,6 +294,7 @@ model Account {
   password              String?
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@map("account")
