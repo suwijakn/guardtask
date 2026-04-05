@@ -1,6 +1,21 @@
-// BetterAuth configuration
+import { betterAuth } from "better-auth";
+import { prismaAdapter } from "better-auth/adapters/prisma";
+import { db } from "./db";
 
-// TODO: Implement BetterAuth config
-export const auth = {
-  // BetterAuth configuration will go here
-};
+export const auth = betterAuth({
+  database: prismaAdapter(db, {
+    provider: "postgresql",
+  }),
+  emailAndPassword: {
+    enabled: true,
+  },
+  session: {
+    expiresIn: 60 * 60 * 24 * 7, // 7 days
+    updateAge: 60 * 60 * 24, // 1 day
+  },
+  secret: process.env.BETTER_AUTH_SECRET!,
+  baseURL: process.env.BETTER_AUTH_URL!,
+  trustedOrigins: [process.env.BETTER_AUTH_URL!],
+});
+
+export type Session = typeof auth.$Infer.Session;
