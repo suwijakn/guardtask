@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { createClient } from "@supabase/supabase-js";
+import { haversineDistance } from "@/lib/geo";
 
 function getSupabaseAdminClient() {
   const supabaseUrl =
@@ -22,6 +23,11 @@ interface CheckinRequest {
   pathType: "A" | "B";
   lat?: number;
   lng?: number;
+}
+
+interface RecentCheckinLike {
+  checkinAt: Date;
+  checkoutAt: Date | null;
 }
 
 function calculateShiftType(hour: number): "day" | "night" {
@@ -49,7 +55,7 @@ export async function POST(req: NextRequest) {
     }
 
     const body: CheckinRequest = await req.json();
-    const { guardId, siteId, photo, lineUserId, pathType, lat, lng } = body;
+    const { guardId, siteId, photo, lineUserId, lat, lng } = body;
 
     // Validate required fields
     if (!guardId || !siteId || !photo || !lineUserId) {
@@ -58,6 +64,14 @@ export async function POST(req: NextRequest) {
         { status: 400 },
       );
     }
+
+    // Location is optional — if missing or invalid, check-in proceeds but
+    // checkinWithinSite is set to null so admins can review.
+    const hasValidLocation =
+      lat != null &&
+      lng != null &&
+      Number.isFinite(lat) &&
+      Number.isFinite(lng);
 
     // Validate guard is active and assigned to site
     const guard = await db.guard.findUnique({
@@ -99,7 +113,7 @@ export async function POST(req: NextRequest) {
     // Upload photo to Supabase Storage
     const photoBuffer = Buffer.from(photo.split(",")[1], "base64");
     const fileName = `${guardId}_${Date.now()}.jpg`;
-    const { data: uploadData, error: uploadError } = await supabase.storage
+    const { error: uploadError } = await supabase.storage
       .from("checkin-photos")
       .upload(fileName, photoBuffer, {
         contentType: "image/jpeg",
@@ -136,16 +150,21 @@ export async function POST(req: NextRequest) {
     );
     const status = calculateStatus(lateMinutes);
 
-    // Check within site geofence
-    let checkinWithinSite = null;
-    if (lat && lng && site.lat && site.lng) {
-      const distance = calculateDistance(
+    // Compute geofence when both guard and site coordinates are available.
+    // null = could not verify (no GPS or site not configured)
+    // false = outside radius (flagged for admin review)
+    // true  = inside radius
+    let checkinWithinSite: boolean | null = null;
+    let distanceMeters: number | null = null;
+
+    if (hasValidLocation && site.lat != null && site.lng != null) {
+      distanceMeters = haversineDistance(
         Number(site.lat),
         Number(site.lng),
-        lat,
-        lng,
+        lat!,
+        lng!,
       );
-      checkinWithinSite = distance <= site.geofenceRadiusM;
+      checkinWithinSite = distanceMeters <= site.geofenceRadiusM;
     }
 
     // Get consecutive shifts data
@@ -171,8 +190,8 @@ export async function POST(req: NextRequest) {
         siteId,
         checkinAt: now,
         checkinPhotoUrl: publicUrl,
-        checkinLat: lat ? String(lat) : null,
-        checkinLng: lng ? String(lng) : null,
+        checkinLat: hasValidLocation ? String(lat) : null,
+        checkinLng: hasValidLocation ? String(lng) : null,
         checkinWithinSite,
         shiftType,
         status,
@@ -191,6 +210,10 @@ export async function POST(req: NextRequest) {
       checkinId: checkin.id,
       status,
       lateMinutes,
+      checkinWithinSite,
+      distanceMeters:
+        distanceMeters != null ? Math.round(distanceMeters) : null,
+      allowedRadiusMeters: site.geofenceRadiusM,
     });
   } catch (error) {
     console.error("Check-in error:", error);
@@ -201,29 +224,10 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// Helper: Calculate distance between two coordinates (Haversine formula)
-function calculateDistance(
-  lat1: number,
-  lon1: number,
-  lat2: number,
-  lon2: number,
-): number {
-  const R = 6371e3; // Earth radius in meters
-  const φ1 = (lat1 * Math.PI) / 180;
-  const φ2 = (lat2 * Math.PI) / 180;
-  const Δφ = ((lat2 - lat1) * Math.PI) / 180;
-  const Δλ = ((lon2 - lon1) * Math.PI) / 180;
-
-  const a =
-    Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
-    Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
-  return R * c;
-}
-
 // Helper: Calculate consecutive shifts
-function calculateConsecutiveShifts(recentCheckins: any[]): number {
+function calculateConsecutiveShifts(
+  recentCheckins: RecentCheckinLike[],
+): number {
   if (recentCheckins.length === 0) return 1;
 
   let consecutive = 1;
@@ -249,7 +253,9 @@ function calculateConsecutiveShifts(recentCheckins: any[]): number {
 }
 
 // Helper: Calculate consecutive hours
-function calculateConsecutiveHours(recentCheckins: any[]): number {
+function calculateConsecutiveHours(
+  recentCheckins: RecentCheckinLike[],
+): number {
   if (recentCheckins.length === 0) return 0;
 
   let totalHours = 0;
@@ -267,7 +273,10 @@ function calculateConsecutiveHours(recentCheckins: any[]): number {
 }
 
 // Helper: Check if this is a double shift (2 shifts in same day)
-function checkDoubleShift(recentCheckins: any[], currentTime: Date): boolean {
+function checkDoubleShift(
+  recentCheckins: RecentCheckinLike[],
+  currentTime: Date,
+): boolean {
   const today = new Date(currentTime);
   today.setHours(0, 0, 0, 0);
 

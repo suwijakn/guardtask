@@ -181,6 +181,35 @@ export default function CheckinPage() {
     fileInputRef.current?.click();
   };
 
+  const getCurrentLocation = async (): Promise<{
+    lat: number;
+    lng: number;
+  } | null> => {
+    if (!navigator.geolocation) {
+      return null;
+    }
+
+    return new Promise((resolve) => {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          resolve({
+            lat: position.coords.latitude,
+            lng: position.coords.longitude,
+          });
+        },
+        () => {
+          // GPS unavailable — return null so check-in can still proceed
+          resolve(null);
+        },
+        {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 0,
+        },
+      );
+    });
+  };
+
   const handleSubmit = async () => {
     if (!selectedGuardId) {
       alert("กรุณาเลือก รปภ.");
@@ -194,21 +223,40 @@ export default function CheckinPage() {
 
     setSubmitting(true);
     try {
+      const location = await getCurrentLocation();
+
+      const requestBody: Record<string, unknown> = {
+        guardId: selectedGuardId,
+        siteId: selectedSiteId,
+        photo,
+        lineUserId,
+        pathType,
+      };
+      if (location) {
+        requestBody.lat = location.lat;
+        requestBody.lng = location.lng;
+      }
+
       const response = await fetch("/api/checkin", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          guardId: selectedGuardId,
-          siteId: selectedSiteId,
-          photo,
-          lineUserId,
-          pathType,
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       if (response.ok) {
         const data = await response.json();
-        alert("เช็คอินสำเร็จ!");
+
+        if (data.checkinWithinSite === false) {
+          alert(
+            `เช็คอินสำเร็จ — แต่ระบบตรวจพบว่าคุณอยู่นอกพื้นที่ (${data.distanceMeters}m / กำหนด ${data.allowedRadiusMeters}m) แจ้งเตือนผู้ดูแลแล้ว`,
+          );
+        } else if (data.checkinWithinSite === null) {
+          alert(
+            "เช็คอินสำเร็จ — ไม่สามารถตรวจสอบตำแหน่งได้ แจ้งเตือนผู้ดูแลแล้ว",
+          );
+        } else {
+          alert("เช็คอินสำเร็จ!");
+        }
 
         // Close LIFF
         if (liff.isInClient()) {
